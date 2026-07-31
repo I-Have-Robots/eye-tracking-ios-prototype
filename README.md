@@ -11,7 +11,14 @@ Requires a device with the TrueDepth camera / ARKit face tracking support.
 
 ## POP — the game
 
-The game starts with a **lock-on phase**: stare at the 🎯 target in the center
+The game starts with a **setup phase**: the AR view goes full screen and a
+wireframe **mesh mask** is fitted to your face, with the original demo's blue
+cone **gazers** on each eye showing where that eye's orientation is pointed.
+The 🔵/🔴 crosshairs render live so you can check the screen mapping, and a
+**gaze sensitivity** slider (persisted across launches) adjusts how far gaze
+movement travels on screen. Continue is enabled once the face is tracked.
+
+Next comes the **lock-on phase**: stare at the 🎯 target in the center
 of the screen until its ring fills. While you hold steady, each eye's gaze
 offset from the target is measured and then subtracted during play, so both
 crosshairs converge on where you're actually looking instead of drifting far
@@ -45,7 +52,13 @@ MenuViewController               Entry menu: Play POP / demo
 ViewController (+ storyboard)    Original gaze demo, unchanged behavior
 POP/
   GazeTracker                    ARKit face tracking → smoothed per-eye screen
-                                 gaze points (delegate callbacks, main thread)
+                                 gaze points (delegate callbacks, main thread).
+                                 Gaze rays are intersected with the screen
+                                 plane analytically — the original SceneKit
+                                 hitTestWithSegment against a finite 1 m plane
+                                 silently dropped frames whenever the noisy
+                                 per-eye ray missed it. Also renders the face
+                                 mesh mask and per-eye gazer visualization.
   GameEngine                     Pure game logic: levels, balloon wander,
                                  convergence detection, dwell timing, score
   GameViewController             CADisplayLink game loop, HUD, AR preview,
@@ -84,8 +97,9 @@ they will fail to launch. This project has been migrated accordingly:
 
 - **SceneKit is deprecated as of iOS 26.** `ARSCNView` still works, but Apple's
   strategic direction is RealityKit (`RealityView` / `ARView`). A future
-  rewrite should replace the SceneKit scene graph and
-  `hitTestWithSegment(from:to:options:)` math with RealityKit equivalents.
+  rewrite should replace the SceneKit scene graph with RealityKit equivalents.
+  (The original demo screen still uses `hitTestWithSegment(from:to:options:)`;
+  the game's `GazeTracker` now intersects the gaze ray analytically.)
 - **Screen geometry is hardcoded for iPhone X** (`phoneScreenSize`,
   `phoneScreenPointSize`, and the `heightCompensation` constant). Gaze mapping
   will be inaccurate on other devices; these should be derived from the current

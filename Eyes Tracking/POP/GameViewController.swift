@@ -22,6 +22,7 @@ final class GameViewController: UIViewController {
 
     private let scoreLabel = UILabel()
     private let levelLabel = UILabel()
+    private let hudStack = UIStackView()
     private let hintLabel = UILabel()
     private let levelToastLabel = UILabel()
     private let quitButton = UIButton(type: .system)
@@ -29,13 +30,31 @@ final class GameViewController: UIViewController {
     private let startOverlay = UIView()
     private let startButton = UIButton(type: .system)
 
-    private enum Phase { case idle, calibrating, playing }
+    // Setup phase: the AR view goes full screen so the player can check the
+    // mesh mask and per-eye gazers, tune sensitivity, and then continue.
+    private let setupPanel = UIView()
+    private let setupStatusLabel = UILabel()
+    private let sensitivitySlider = UISlider()
+    private let continueButton = UIButton(type: .system)
+    private var sceneViewCornerConstraints: [NSLayoutConstraint] = []
+    private var sceneViewFullscreenConstraints: [NSLayoutConstraint] = []
+
+    private static let sensitivityKey = "gazeSensitivity"
+
+    private enum Phase { case idle, setup, calibrating, playing }
 
     private var displayLink: CADisplayLink?
     private var lastTickTime: CFTimeInterval = 0
     private var latestLeftGaze: CGPoint?
     private var latestRightGaze: CGPoint?
+    private var lastGazeUpdateTime: CFTimeInterval = 0
     private var phase = Phase.idle
+
+    /// Gaze points go stale when ARKit stops updating the face anchor (face
+    /// out of frame); treat them as absent instead of showing frozen crosshairs.
+    private var gazeIsFresh: Bool {
+        CACurrentMediaTime() - lastGazeUpdateTime < 0.6
+    }
 
     // Lock-on calibration: while the player stares at the center target we
     // measure each eye's offset from it, then subtract that during play so
@@ -60,13 +79,21 @@ final class GameViewController: UIViewController {
         engine.delegate = self
         setupGameLayer()
         setupHUD()
+        setupConfigurationUI()
         setupStartOverlay()
 
         if GazeTracker.isSupported {
             let tracker = GazeTracker(sceneView: sceneView)
             tracker.delegate = self
+            tracker.sensitivity = savedSensitivity
             gazeTracker = tracker
         }
+        sensitivitySlider.value = Float(savedSensitivity)
+    }
+
+    private var savedSensitivity: CGFloat {
+        let stored = UserDefaults.standard.object(forKey: Self.sensitivityKey) as? Double
+        return CGFloat(stored ?? 1.5)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -87,7 +114,7 @@ final class GameViewController: UIViewController {
             engine.playfield = playfieldRect()
         case .calibrating:
             calibrationTarget.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
-        case .idle:
+        case .idle, .setup:
             break
         }
     }
@@ -102,22 +129,33 @@ final class GameViewController: UIViewController {
         calibrationTarget.isHidden = true
         view.addSubview(calibrationTarget)
 
-        leftCrosshair.isHidden = true
-        rightCrosshair.isHidden = true
-        view.addSubview(leftCrosshair)
-        view.addSubview(rightCrosshair)
-
-        // Small AR face preview, like the original demo.
+        // The AR face view: full screen during the setup phase so the mesh
+        // mask and eye gazers are easy to line up, then a small corner
+        // preview during calibration and play, like the original demo.
         sceneView.translatesAutoresizingMaskIntoConstraints = false
         sceneView.layer.cornerRadius = 16
         sceneView.clipsToBounds = true
         view.addSubview(sceneView)
-        NSLayoutConstraint.activate([
+        sceneViewCornerConstraints = [
             sceneView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             sceneView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
             sceneView.widthAnchor.constraint(equalToConstant: 84),
             sceneView.heightAnchor.constraint(equalToConstant: 112),
-        ])
+        ]
+        sceneViewFullscreenConstraints = [
+            sceneView.topAnchor.constraint(equalTo: view.topAnchor),
+            sceneView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            sceneView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            sceneView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ]
+        NSLayoutConstraint.activate(sceneViewCornerConstraints)
+
+        // Crosshairs sit above the AR view so they stay visible while it is
+        // full screen during setup.
+        leftCrosshair.isHidden = true
+        rightCrosshair.isHidden = true
+        view.addSubview(leftCrosshair)
+        view.addSubview(rightCrosshair)
     }
 
     private func setupHUD() {
@@ -131,7 +169,8 @@ final class GameViewController: UIViewController {
         levelLabel.textAlignment = .center
         levelLabel.text = "Level 1"
 
-        let hudStack = UIStackView(arrangedSubviews: [scoreLabel, levelLabel])
+        hudStack.addArrangedSubview(scoreLabel)
+        hudStack.addArrangedSubview(levelLabel)
         hudStack.axis = .vertical
         hudStack.spacing = 2
         hudStack.translatesAutoresizingMaskIntoConstraints = false
@@ -165,7 +204,9 @@ final class GameViewController: UIViewController {
 
             hintLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
             hintLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            hintLabel.trailingAnchor.constraint(equalTo: sceneView.leadingAnchor, constant: -12),
+            // Keeps clear of the corner AR preview; not anchored to the AR
+            // view itself since that goes full screen during setup.
+            hintLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -112),
 
             levelToastLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             levelToastLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -174,6 +215,64 @@ final class GameViewController: UIViewController {
             quitButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             quitButton.widthAnchor.constraint(equalToConstant: 44),
             quitButton.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
+    private func setupConfigurationUI() {
+        setupPanel.backgroundColor = UIColor(white: 0, alpha: 0.6)
+        setupPanel.layer.cornerRadius = 20
+        setupPanel.isHidden = true
+        setupPanel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(setupPanel)
+
+        let titleLabel = UILabel()
+        titleLabel.text = "Eye Tracking Setup"
+        titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        titleLabel.textColor = .white
+        titleLabel.textAlignment = .center
+
+        setupStatusLabel.font = .systemFont(ofSize: 15)
+        setupStatusLabel.textColor = UIColor(white: 1, alpha: 0.9)
+        setupStatusLabel.textAlignment = .center
+        setupStatusLabel.numberOfLines = 0
+
+        let sliderLabel = UILabel()
+        sliderLabel.text = "Gaze sensitivity"
+        sliderLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        sliderLabel.textColor = UIColor(white: 1, alpha: 0.9)
+        sliderLabel.textAlignment = .center
+
+        sensitivitySlider.minimumValue = 0.5
+        sensitivitySlider.maximumValue = 2.5
+        sensitivitySlider.addTarget(self, action: #selector(sensitivityChanged), for: .valueChanged)
+
+        continueButton.setTitle("Continue", for: .normal)
+        continueButton.titleLabel?.font = .systemFont(ofSize: 20, weight: .bold)
+        continueButton.setTitleColor(.white, for: .normal)
+        continueButton.backgroundColor = .systemPink
+        continueButton.layer.cornerRadius = 12
+        continueButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 40, bottom: 10, right: 40)
+        continueButton.addTarget(self, action: #selector(continueTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, setupStatusLabel, sliderLabel, sensitivitySlider, continueButton])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.alignment = .center
+        stack.setCustomSpacing(6, after: sliderLabel)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        setupPanel.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            setupPanel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            setupPanel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            setupPanel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+
+            stack.topAnchor.constraint(equalTo: setupPanel.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: setupPanel.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: setupPanel.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: setupPanel.trailingAnchor, constant: -20),
+
+            sensitivitySlider.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
     }
 
@@ -195,15 +294,17 @@ final class GameViewController: UIViewController {
         instructionsLabel.font = .systemFont(ofSize: 17)
         if GazeTracker.isSupported {
             instructionsLabel.text = """
-            First, stare at the center 🎯 to lock
-            your eyes on — then the game begins.
+            First, set up tracking: a mesh mask locks
+            onto your face and blue beams show where
+            each eye is pointed. Tune the sensitivity
+            until the crosshairs follow your gaze.
+
+            Then stare at the center 🎯 to lock on —
+            and the game begins.
 
             🔵 Left eye · 🔴 Right eye
             Get both crosshairs on the balloon and
             hold your gaze to pop it.
-
-            Balloons shrink and move as you level up —
-            and at the hardest levels, so do your crosshairs.
             """
         } else {
             instructionsLabel.text = "This game requires a device with TrueDepth face tracking (ARKit)."
@@ -246,11 +347,70 @@ final class GameViewController: UIViewController {
             self.startOverlay.isHidden = true
         }
 
-        beginCalibration()
+        beginSetup()
 
         lastTickTime = 0
         displayLink = CADisplayLink(target: self, selector: #selector(tick(_:)))
         displayLink?.add(to: .main, forMode: .common)
+    }
+
+    // MARK: - Setup phase
+
+    private func beginSetup() {
+        phase = .setup
+        balloonView.isHidden = true
+        calibrationTarget.isHidden = true
+        hudStack.isHidden = true
+        hintLabel.isHidden = true
+
+        NSLayoutConstraint.deactivate(sceneViewCornerConstraints)
+        NSLayoutConstraint.activate(sceneViewFullscreenConstraints)
+        sceneView.layer.cornerRadius = 0
+        view.layoutIfNeeded()
+
+        setupPanel.isHidden = false
+        view.bringSubviewToFront(setupPanel)
+        view.bringSubviewToFront(quitButton)
+    }
+
+    private func updateSetup() {
+        let tracked = gazeIsFresh
+        layoutCrosshairs(left: tracked ? latestLeftGaze : nil,
+                         right: tracked ? latestRightGaze : nil,
+                         radius: LevelConfig.forLevel(1).crosshairRadius,
+                         leftOn: false, rightOn: false)
+
+        if tracked {
+            setupStatusLabel.text = """
+            Mask locked. The blue beams show where each eye points; \
+            🔵/🔴 are where that lands on screen. Look around — if the \
+            rings move too far or too little, adjust the sensitivity.
+            """
+        } else {
+            setupStatusLabel.text = "Hold the phone at arm's length and center your face until the mesh mask appears."
+        }
+        continueButton.isEnabled = tracked
+        continueButton.alpha = tracked ? 1 : 0.5
+    }
+
+    @objc private func sensitivityChanged() {
+        gazeTracker?.sensitivity = CGFloat(sensitivitySlider.value)
+        UserDefaults.standard.set(Double(sensitivitySlider.value), forKey: Self.sensitivityKey)
+    }
+
+    @objc private func continueTapped() {
+        setupPanel.isHidden = true
+        hudStack.isHidden = false
+        hintLabel.isHidden = false
+
+        NSLayoutConstraint.deactivate(sceneViewFullscreenConstraints)
+        NSLayoutConstraint.activate(sceneViewCornerConstraints)
+        UIView.animate(withDuration: 0.35) {
+            self.sceneView.layer.cornerRadius = 16
+            self.view.layoutIfNeeded()
+        }
+
+        beginCalibration()
     }
 
     private func beginCalibration() {
@@ -293,6 +453,8 @@ final class GameViewController: UIViewController {
         switch phase {
         case .idle:
             break
+        case .setup:
+            updateSetup()
         case .calibrating:
             updateCalibration(deltaTime: dt)
         case .playing:
@@ -304,23 +466,26 @@ final class GameViewController: UIViewController {
     // MARK: - Lock-on calibration
 
     private var correctedLeftGaze: CGPoint? {
-        guard let gaze = latestLeftGaze else { return nil }
+        guard gazeIsFresh, let gaze = latestLeftGaze else { return nil }
         return CGPoint(x: gaze.x + leftGazeOffset.x, y: gaze.y + leftGazeOffset.y)
     }
 
     private var correctedRightGaze: CGPoint? {
-        guard let gaze = latestRightGaze else { return nil }
+        guard gazeIsFresh, let gaze = latestRightGaze else { return nil }
         return CGPoint(x: gaze.x + rightGazeOffset.x, y: gaze.y + rightGazeOffset.y)
     }
 
     private func updateCalibration(deltaTime dt: TimeInterval) {
+        let fresh = gazeIsFresh
+
         // Show the raw crosshairs (clamped on-screen) so the player can watch
         // them settle while staring at the target.
-        layoutCrosshairs(left: latestLeftGaze, right: latestRightGaze,
+        layoutCrosshairs(left: fresh ? latestLeftGaze : nil,
+                         right: fresh ? latestRightGaze : nil,
                          radius: LevelConfig.forLevel(1).crosshairRadius,
                          leftOn: false, rightOn: false)
 
-        guard let left = latestLeftGaze, let right = latestRightGaze else {
+        guard fresh, let left = latestLeftGaze, let right = latestRightGaze else {
             hintLabel.text = "Face the camera so it can find your eyes"
             return
         }
@@ -371,7 +536,7 @@ final class GameViewController: UIViewController {
         scoreLabel.text = "\(engine.score)"
         levelLabel.text = "Level \(level.number)"
 
-        if latestLeftGaze == nil || latestRightGaze == nil {
+        if correctedLeftGaze == nil || correctedRightGaze == nil {
             hintLabel.text = "Face the camera so it can find your eyes"
         } else if engine.bothEyesOnTarget {
             hintLabel.text = "Hold it…"
@@ -466,6 +631,7 @@ extension GameViewController: GazeTrackerDelegate {
                      faceDistance: Float) {
         latestLeftGaze = leftGaze
         latestRightGaze = rightGaze
+        lastGazeUpdateTime = CACurrentMediaTime()
     }
 }
 
