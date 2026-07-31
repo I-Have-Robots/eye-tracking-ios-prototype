@@ -15,6 +15,7 @@
 		D0FACE000000000000000104 /* GameViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FACE000000000000000004 /* GameViewController.swift */; };
 		D0FACE000000000000000105 /* BalloonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FACE000000000000000005 /* BalloonView.swift */; };
 		D0FACE000000000000000106 /* CrosshairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FACE000000000000000006 /* CrosshairView.swift */; };
+		D0FACE000000000000000201 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D0FACE000000000000000200 /* WebKit.framework */; };
 		D0E5847A20C806050052967A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E5847920C806050052967A /* AppDelegate.swift */; };
 		D0E5847E20C806050052967A /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E5847D20C806050052967A /* ViewController.swift */; };
 		D0E5848120C806050052967A /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = D0E5847F20C806050052967A /* Main.storyboard */; };
@@ -31,6 +32,7 @@
 		D0FACE000000000000000004 /* GameViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GameViewController.swift; sourceTree = "<group>"; };
 		D0FACE000000000000000005 /* BalloonView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BalloonView.swift; sourceTree = "<group>"; };
 		D0FACE000000000000000006 /* CrosshairView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CrosshairView.swift; sourceTree = "<group>"; };
+		D0FACE000000000000000200 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		D0E5847620C806050052967A /* Eyes Tracking.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Eyes Tracking.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0E5847920C806050052967A /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D0E5847D20C806050052967A /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -45,6 +47,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D0FACE000000000000000201 /* WebKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -56,7 +59,16 @@
 			children = (
 				D0E5847820C806050052967A /* Eyes Tracking */,
 				D0E5847720C806050052967A /* Products */,
+				D0FACE000000000000000210 /* Frameworks */,
 			);
+			sourceTree = "<group>";
+		};
+		D0FACE000000000000000210 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D0FACE000000000000000200 /* WebKit.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		D0E5847720C806050052967A /* Products */ = {
