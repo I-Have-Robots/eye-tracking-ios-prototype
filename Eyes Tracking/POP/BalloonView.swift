@@ -8,11 +8,16 @@
 import UIKit
 
 /// The pop target: a balloon with a circular dwell-progress ring around it.
+/// Also reused as the calibration lock-on target by swapping the emoji.
 final class BalloonView: UIView {
 
     private let emojiLabel = UILabel()
     private let progressTrackLayer = CAShapeLayer()
     private let progressLayer = CAShapeLayer()
+
+    var emoji: String = "🎈" {
+        didSet { emojiLabel.text = emoji }
+    }
 
     /// 0...1 dwell progress shown as a ring filling clockwise from the top.
     var progress: CGFloat = 0 {

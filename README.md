@@ -11,7 +11,14 @@ Requires a device with the TrueDepth camera / ARKit face tracking support.
 
 ## POP — the game
 
-A balloon appears on screen. Pop it by *converging both eyes on it*: the blue
+The game starts with a **lock-on phase**: stare at the 🎯 target in the center
+of the screen until its ring fills. While you hold steady, each eye's gaze
+offset from the target is measured and then subtracted during play, so both
+crosshairs converge on where you're actually looking instead of drifting far
+apart. Crosshairs are clamped to the screen edge so neither can ever wander
+fully off screen.
+
+Then a balloon appears. Pop it by *converging both eyes on it*: the blue
 crosshair tracks your left eye's gaze, the red crosshair tracks your right
 eye's gaze, and both must sit on the balloon. Hold the gaze for the dwell time
 and the balloon pops, scoring `level × 10` points. Pop 3 balloons to advance a
@@ -24,7 +31,7 @@ Difficulty ramps over the first 8 levels:
 | Balloon radius   | 64 pt   | 26 pt    |
 | Balloon movement | still   | 140 pt/s wander |
 | Dwell time       | 0.7 s   | 1.4 s    |
-| Crosshair radius | 42 pt   | 18 pt (shrinks only in the hardest half of the ramp) |
+| Crosshair radius | 26 pt   | 13 pt (shrinks only in the hardest half of the ramp) |
 
 Smaller crosshairs are not just cosmetic — an eye counts as on-target within
 the balloon radius plus half the crosshair radius, so the aim tolerance

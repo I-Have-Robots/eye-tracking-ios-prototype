@@ -29,11 +29,23 @@ final class GameViewController: UIViewController {
     private let startOverlay = UIView()
     private let startButton = UIButton(type: .system)
 
+    private enum Phase { case idle, calibrating, playing }
+
     private var displayLink: CADisplayLink?
     private var lastTickTime: CFTimeInterval = 0
     private var latestLeftGaze: CGPoint?
     private var latestRightGaze: CGPoint?
-    private var isPlaying = false
+    private var phase = Phase.idle
+
+    // Lock-on calibration: while the player stares at the center target we
+    // measure each eye's offset from it, then subtract that during play so
+    // both crosshairs converge on the true gaze point.
+    private let calibrationTarget = BalloonView()
+    private var leftCalibrationSamples: [CGPoint] = []
+    private var rightCalibrationSamples: [CGPoint] = []
+    private var calibrationProgress: Double = 0
+    private var leftGazeOffset = CGPoint.zero
+    private var rightGazeOffset = CGPoint.zero
 
     private let popHaptics = UIImpactFeedbackGenerator(style: .medium)
 
@@ -70,8 +82,13 @@ final class GameViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if isPlaying {
+        switch phase {
+        case .playing:
             engine.playfield = playfieldRect()
+        case .calibrating:
+            calibrationTarget.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        case .idle:
+            break
         }
     }
 
@@ -80,6 +97,10 @@ final class GameViewController: UIViewController {
     private func setupGameLayer() {
         balloonView.isHidden = true
         view.addSubview(balloonView)
+
+        calibrationTarget.emoji = "🎯"
+        calibrationTarget.isHidden = true
+        view.addSubview(calibrationTarget)
 
         leftCrosshair.isHidden = true
         rightCrosshair.isHidden = true
@@ -174,10 +195,12 @@ final class GameViewController: UIViewController {
         instructionsLabel.font = .systemFont(ofSize: 17)
         if GazeTracker.isSupported {
             instructionsLabel.text = """
-            Look at the balloon and hold your gaze to pop it.
+            First, stare at the center 🎯 to lock
+            your eyes on — then the game begins.
 
             🔵 Left eye · 🔴 Right eye
-            Both crosshairs must be on the balloon.
+            Get both crosshairs on the balloon and
+            hold your gaze to pop it.
 
             Balloons shrink and move as you level up —
             and at the hardest levels, so do your crosshairs.
@@ -223,19 +246,40 @@ final class GameViewController: UIViewController {
             self.startOverlay.isHidden = true
         }
 
-        isPlaying = true
-        balloonView.isHidden = false
-        engine.start(in: playfieldRect())
+        beginCalibration()
 
         lastTickTime = 0
         displayLink = CADisplayLink(target: self, selector: #selector(tick(_:)))
         displayLink?.add(to: .main, forMode: .common)
     }
 
+    private func beginCalibration() {
+        phase = .calibrating
+        calibrationProgress = 0
+        leftCalibrationSamples = []
+        rightCalibrationSamples = []
+        leftGazeOffset = .zero
+        rightGazeOffset = .zero
+
+        balloonView.isHidden = true
+        calibrationTarget.bounds = CGRect(x: 0, y: 0, width: 72, height: 72)
+        calibrationTarget.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        calibrationTarget.progress = 0
+        calibrationTarget.isHidden = false
+        calibrationTarget.animateSpawn()
+    }
+
+    private func startPlaying() {
+        phase = .playing
+        calibrationTarget.isHidden = true
+        balloonView.isHidden = false
+        engine.start(in: playfieldRect())
+    }
+
     private func stopGameLoop() {
         displayLink?.invalidate()
         displayLink = nil
-        isPlaying = false
+        phase = .idle
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -245,8 +289,71 @@ final class GameViewController: UIViewController {
 
         // Clamp dt so a hitch doesn't teleport the balloon or insta-pop.
         let dt = min(now - lastTickTime, 1.0 / 20.0)
-        engine.update(deltaTime: dt, leftGaze: latestLeftGaze, rightGaze: latestRightGaze)
-        syncViews()
+
+        switch phase {
+        case .idle:
+            break
+        case .calibrating:
+            updateCalibration(deltaTime: dt)
+        case .playing:
+            engine.update(deltaTime: dt, leftGaze: correctedLeftGaze, rightGaze: correctedRightGaze)
+            syncViews()
+        }
+    }
+
+    // MARK: - Lock-on calibration
+
+    private var correctedLeftGaze: CGPoint? {
+        guard let gaze = latestLeftGaze else { return nil }
+        return CGPoint(x: gaze.x + leftGazeOffset.x, y: gaze.y + leftGazeOffset.y)
+    }
+
+    private var correctedRightGaze: CGPoint? {
+        guard let gaze = latestRightGaze else { return nil }
+        return CGPoint(x: gaze.x + rightGazeOffset.x, y: gaze.y + rightGazeOffset.y)
+    }
+
+    private func updateCalibration(deltaTime dt: TimeInterval) {
+        // Show the raw crosshairs (clamped on-screen) so the player can watch
+        // them settle while staring at the target.
+        layoutCrosshairs(left: latestLeftGaze, right: latestRightGaze,
+                         radius: LevelConfig.forLevel(1).crosshairRadius,
+                         leftOn: false, rightOn: false)
+
+        guard let left = latestLeftGaze, let right = latestRightGaze else {
+            hintLabel.text = "Face the camera so it can find your eyes"
+            return
+        }
+        hintLabel.text = "Stare at the 🎯 to lock on your eyes"
+
+        let window = 30
+        leftCalibrationSamples = Array((leftCalibrationSamples + [left]).suffix(window))
+        rightCalibrationSamples = Array((rightCalibrationSamples + [right]).suffix(window))
+
+        guard leftCalibrationSamples.count == window,
+              let meanLeft = leftCalibrationSamples.averagePoint,
+              let meanRight = rightCalibrationSamples.averagePoint else { return }
+
+        // A steady gaze is all that's needed — every recent sample close to
+        // its own mean. Where the raw points sit doesn't matter, since the
+        // measured offset corrects that.
+        let steadyTolerance: CGFloat = 60
+        let steady = leftCalibrationSamples.allSatisfy { $0.distance(to: meanLeft) < steadyTolerance }
+            && rightCalibrationSamples.allSatisfy { $0.distance(to: meanRight) < steadyTolerance }
+
+        if steady {
+            calibrationProgress = min(1, calibrationProgress + dt / 1.5)
+        } else {
+            calibrationProgress = max(0, calibrationProgress - dt / 1.5)
+        }
+        calibrationTarget.progress = CGFloat(calibrationProgress)
+
+        if calibrationProgress >= 1 {
+            let center = calibrationTarget.center
+            leftGazeOffset = CGPoint(x: center.x - meanLeft.x, y: center.y - meanLeft.y)
+            rightGazeOffset = CGPoint(x: center.x - meanRight.x, y: center.y - meanRight.y)
+            startPlaying()
+        }
     }
 
     private func syncViews() {
@@ -257,21 +364,9 @@ final class GameViewController: UIViewController {
         balloonView.center = engine.balloonPosition
         balloonView.progress = CGFloat(engine.dwellProgress)
 
-        let crosshairSize = level.crosshairRadius * 2
-        let crosshairs: [(CrosshairView, CGPoint?, Bool)] = [
-            (leftCrosshair, latestLeftGaze, engine.leftOnTarget),
-            (rightCrosshair, latestRightGaze, engine.rightOnTarget),
-        ]
-        for (crosshair, gaze, onTarget) in crosshairs {
-            crosshair.bounds = CGRect(x: 0, y: 0, width: crosshairSize, height: crosshairSize)
-            if let gaze = gaze {
-                crosshair.center = gaze
-                crosshair.isHidden = false
-            } else {
-                crosshair.isHidden = true
-            }
-            crosshair.isOnTarget = onTarget
-        }
+        layoutCrosshairs(left: correctedLeftGaze, right: correctedRightGaze,
+                         radius: level.crosshairRadius,
+                         leftOn: engine.leftOnTarget, rightOn: engine.rightOnTarget)
 
         scoreLabel.text = "\(engine.score)"
         levelLabel.text = "Level \(level.number)"
@@ -290,6 +385,31 @@ final class GameViewController: UIViewController {
     private func playfieldRect() -> CGRect {
         let safe = view.bounds.inset(by: view.safeAreaInsets)
         return safe.inset(by: UIEdgeInsets(top: 96, left: 24, bottom: 152, right: 24))
+    }
+
+    private func layoutCrosshairs(left: CGPoint?, right: CGPoint?, radius: CGFloat, leftOn: Bool, rightOn: Bool) {
+        let size = radius * 2
+        let crosshairs: [(CrosshairView, CGPoint?, Bool)] = [
+            (leftCrosshair, left, leftOn),
+            (rightCrosshair, right, rightOn),
+        ]
+        for (crosshair, gaze, onTarget) in crosshairs {
+            crosshair.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+            if let gaze = gaze {
+                // Clamp to the screen edge so a wandering eye's crosshair
+                // never disappears entirely.
+                crosshair.center = clampToView(gaze, inset: radius)
+                crosshair.isHidden = false
+            } else {
+                crosshair.isHidden = true
+            }
+            crosshair.isOnTarget = onTarget
+        }
+    }
+
+    private func clampToView(_ point: CGPoint, inset: CGFloat) -> CGPoint {
+        return CGPoint(x: min(max(point.x, inset), view.bounds.width - inset),
+                       y: min(max(point.y, inset), view.bounds.height - inset))
     }
 
     // MARK: - Effects
