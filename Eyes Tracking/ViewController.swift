@@ -182,8 +182,8 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
             self.eyeLookAtPositionXs = Array(self.eyeLookAtPositionXs.suffix(smoothThresholdNumber))
             self.eyeLookAtPositionYs = Array(self.eyeLookAtPositionYs.suffix(smoothThresholdNumber))
             
-            let smoothEyeLookAtPositionX = self.eyeLookAtPositionXs.average!
-            let smoothEyeLookAtPositionY = self.eyeLookAtPositionYs.average!
+            guard let smoothEyeLookAtPositionX = self.eyeLookAtPositionXs.average,
+                  let smoothEyeLookAtPositionY = self.eyeLookAtPositionYs.average else { return }
             
             // update indicator position
             self.eyePositionIndicatorView.transform = CGAffineTransform(translationX: smoothEyeLookAtPositionX, y: smoothEyeLookAtPositionY)
@@ -208,7 +208,8 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
     }
     
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        virtualPhoneNode.transform = (sceneView.pointOfView?.transform)!
+        guard let pointOfViewTransform = sceneView.pointOfView?.transform else { return }
+        virtualPhoneNode.transform = pointOfViewTransform
     }
     
     func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
