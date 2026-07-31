@@ -110,6 +110,29 @@ class ViewController: UIViewController, ARSCNViewDelegate, ARSessionDelegate {
         // Set LookAtTargetEye at 2 meters away from the center of eyeballs to create segment vector
         lookAtTargetEyeLNode.position.z = 2
         lookAtTargetEyeRNode.position.z = 2
+
+        addBackButtonIfNeeded()
+    }
+
+    private func addBackButtonIfNeeded() {
+        guard navigationController != nil else { return }
+        let backButton = UIButton(type: .system)
+        backButton.setTitle("✕", for: .normal)
+        backButton.titleLabel?.font = .systemFont(ofSize: 26, weight: .semibold)
+        backButton.tintColor = .white
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+        backButton.addTarget(self, action: #selector(backTapped), for: .touchUpInside)
+        view.addSubview(backButton)
+        NSLayoutConstraint.activate([
+            backButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            backButton.widthAnchor.constraint(equalToConstant: 44),
+            backButton.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
+    @objc private func backTapped() {
+        navigationController?.popViewController(animated: true)
     }
     
     override func viewWillAppear(_ animated: Bool) {

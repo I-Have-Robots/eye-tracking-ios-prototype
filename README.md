@@ -1,10 +1,54 @@
 # Eyes Tracking (iOS Prototype)
 
 An ARKit face-tracking prototype that estimates where the user is looking on the
-screen using `ARFaceAnchor`'s eye transforms, and overlays a gaze indicator on a
-`WKWebView`.
+screen using `ARFaceAnchor`'s eye transforms. It now ships two experiences,
+selectable from a menu at launch:
+
+- **POP 🎈** — an eye-tracking game (see below).
+- **Eye Tracking Demo** — the original gaze-indicator-over-WKWebView prototype.
 
 Requires a device with the TrueDepth camera / ARKit face tracking support.
+
+## POP — the game
+
+A balloon appears on screen. Pop it by *converging both eyes on it*: the blue
+crosshair tracks your left eye's gaze, the red crosshair tracks your right
+eye's gaze, and both must sit on the balloon. Hold the gaze for the dwell time
+and the balloon pops, scoring `level × 10` points. Pop 3 balloons to advance a
+level. Losing the balloon drains dwell progress, shown as a yellow ring.
+
+Difficulty ramps over the first 8 levels:
+
+| Parameter        | Level 1 | Level 8+ |
+|------------------|---------|----------|
+| Balloon radius   | 64 pt   | 26 pt    |
+| Balloon movement | still   | 140 pt/s wander |
+| Dwell time       | 0.7 s   | 1.4 s    |
+| Crosshair radius | 42 pt   | 18 pt (shrinks only in the hardest half of the ramp) |
+
+Smaller crosshairs are not just cosmetic — an eye counts as on-target within
+the balloon radius plus half the crosshair radius, so the aim tolerance
+tightens with them.
+
+### Architecture
+
+```
+AppDelegate / SceneDelegate      UIScene lifecycle; programmatic window
+MenuViewController               Entry menu: Play POP / demo
+ViewController (+ storyboard)    Original gaze demo, unchanged behavior
+POP/
+  GazeTracker                    ARKit face tracking → smoothed per-eye screen
+                                 gaze points (delegate callbacks, main thread)
+  GameEngine                     Pure game logic: levels, balloon wander,
+                                 convergence detection, dwell timing, score
+  GameViewController             CADisplayLink game loop, HUD, AR preview,
+                                 pop effects and haptics
+  BalloonView / CrosshairView    Render the target and per-eye aim assists
+```
+
+`GazeTracker` and `GameEngine` are deliberately independent: the tracker knows
+nothing about the game, and the engine is plain UIKit geometry with no ARKit
+imports, so it can be unit-tested or re-skinned without a device.
 
 ## Dependencies & security
 
