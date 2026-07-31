@@ -12,9 +12,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        // The window and root view controller are instantiated automatically
-        // from Main.storyboard via UISceneStoryboardFile in the scene manifest.
-        guard scene is UIWindowScene else { return }
+        guard let windowScene = scene as? UIWindowScene else { return }
+
+        let navigationController = UINavigationController(rootViewController: MenuViewController())
+        navigationController.setNavigationBarHidden(true, animated: false)
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = navigationController
+        self.window = window
+        window.makeKeyAndVisible()
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
