@@ -23,11 +23,12 @@ struct LevelConfig {
         let t = CGFloat(min(number - 1, 7)) / 7
 
         // Crosshairs only start shrinking in the hardest half of the ramp.
+        // Kept small so both per-eye crosshairs comfortably fit on screen.
         let crosshairRadius: CGFloat
         if t <= 0.5 {
-            crosshairRadius = 42
+            crosshairRadius = 26
         } else {
-            crosshairRadius = lerp(42, 18, (t - 0.5) * 2)
+            crosshairRadius = lerp(26, 13, (t - 0.5) * 2)
         }
 
         return LevelConfig(number: number,
